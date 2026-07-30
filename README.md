@@ -1,4 +1,4 @@
-# pip-manager
+# Python Installs Pkgs Manager
 
 Reclaim disk space from pip — without touching your Python installation.
 
@@ -26,6 +26,11 @@ clean them up safely.
 - 🎯 **Zero risk to your Python install** — this only ever calls
   `python -m pip ...` on third-party packages and pip's own cache; it never
   touches the interpreter or standard library.
+
+## S.S.
+<img width="1000" height="375" alt="image" src="https://github.com/user-attachments/assets/c07f0ea6-9b52-44ae-9ac6-7ba1a9618d13" />
+<img width="707" height="611" alt="image" src="https://github.com/user-attachments/assets/f631d71b-2e3c-499f-b659-a180f1d4a53a" />
+
 
 ## Install
 
