@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # Python Install Packages Manager
 """
-
 Lets you:
   * List installed packages sorted by real disk usage.
   * Uninstall packages safely, selecting by number, comma list, range
