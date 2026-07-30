@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+# Python Install Packages Manager
 """
-pip-manager — Reclaim disk space from pip without touching your Python install.
 
 Lets you:
   * List installed packages sorted by real disk usage.
-  * Uninstall packages safely (pip / setuptools / wheel are protected).
+  * Uninstall packages safely, selecting by number, comma list, range
+    (e.g. "1-165"), or "all" — pip / setuptools / wheel / packaging are
+    always protected, no matter how they were selected.
   * Inspect and clean pip's cache (HTTP download cache + locally built wheels).
   * See exactly which folders on disk everything lives in.
 
@@ -32,17 +34,32 @@ from pathlib import Path
 
 try:
     from packaging.version import parse as parse_version
+    from packaging.utils import canonicalize_name
 except ImportError:
     print("Missing dependency. Install it with:\n    pip install packaging")
     sys.exit(1)
 
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Its-Xths"
-__repo__ = "https://github.com/its-xths/pip-manager"
+__repo__ = "https://github.com/Its-Xths/pip-manager"
 
-LOG_FILE = Path(__file__).resolve().parent / "Xths_PiP_Logs_.log"
-PROTECTED_PACKAGES = {"pip", "setuptools", "wheel"}
+LOG_FILE = Path(__file__).resolve().parent / "xths_pip_logs.log"
+
+# Packages this script will NEVER uninstall, no matter how they're selected
+# (by number, by range, by name, from a future scripted call, etc.):
+#   - pip / setuptools / wheel: removing these can break pip itself.
+#   - packaging: this script imports it directly at startup; removing it
+#     would break pip-manager the next time it runs.
+# Matched with packaging's own canonicalize_name(), so "Pip", "PIP",
+# "pip_manager"-style underscores, etc. can't slip past a naive string
+# comparison — this is the same normalization pip/PyPI use internally.
+PROTECTED_PACKAGES = {canonicalize_name(p) for p in ("pip", "setuptools", "wheel", "packaging")}
+
+
+def is_protected(name: str) -> bool:
+    """True if `name` refers to a package that must never be uninstalled."""
+    return canonicalize_name(name) in PROTECTED_PACKAGES
 
 class C:
     _enabled = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -57,13 +74,23 @@ class C:
     CYAN = "\033[36m" if _enabled else ""
 
 
+def _enable_windows_ansi():
+    """Turn on ANSI escape-code support in modern Windows terminals so the
+    colored output doesn't render as raw \\033[...m sequences."""
+    if os.name == "nt":
+        try:
+            os.system("")
+        except OSError:
+            pass
+
+
 def banner():
     print(f"""{C.CYAN}{C.BOLD}
   ____  ____   __  __
- |  _ \\|  _ \\ |  \\/  | __ _ _ __   __ _  __ _  ___ _ __
- | |_) | |_) || |\\/| |/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|
- |  __/|  __/ | |  | | (_| | | | | (_| | (_| |  __/ |
- |_|   |_|    |_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|_| . XTHS (v.01)
+ |  _ \\|  _ \ \ |  \\/  | __ _ _ __   __ _  __ _  ___ _ __
+ | |_) | |_) | | |\\/| |/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|
+ |  __/|  __/  | |  | | (_| | | | | (_| | (_| |  __/ |
+ |_|   |_|     |_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|_|  .XTHS
                                         |___/
 {C.RESET}{C.DIM} pip-manager v{__version__}  ·  by {__author__}  ·  {__repo__}{C.RESET}
 """)
@@ -73,9 +100,11 @@ def log_action(message: str):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().isoformat(timespec='seconds')}] {message}\n")
 
+# ui ----
+
 class Spinner:
     """Indeterminate spinner for operations of unknown duration (pip calls)."""
-    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "XTHS"]
 
     def __init__(self, message: str):
         self.message = message
@@ -116,7 +145,13 @@ def progress_bar(current: int, total: int, prefix: str = "", width: int = 30):
     sys.stdout.write(f"\r{prefix} {C.CYAN}[{bar}]{C.RESET} {pct:5.1f}% ({current}/{total}){end}")
     sys.stdout.flush()
 
-# func_helpers -----
+# def helpers ----
+
+def truncate(text: str, width: int) -> str:
+    """Shorten text with an ellipsis instead of letting it blow out a
+    fixed-width table column and break alignment."""
+    return text if len(text) <= width else text[: width - 1] + "…"
+
 
 def human_size(num_bytes: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -150,7 +185,7 @@ def dir_size(path: str) -> int:
     return total
 
 
-# path + env  -----
+# env + path ----
 
 def show_environment_info():
     print(f"\n{C.BOLD}Environment & storage locations{C.RESET}")
@@ -174,7 +209,7 @@ def show_environment_info():
     print("-" * 64)
 
 
-# sizes + unin -----
+# pkgs unin + size ----
 
 def get_installed_package_sizes():
     """Return {name: (size_bytes, version, location)} using each package's
@@ -208,29 +243,42 @@ def print_package_table(ordered):
     print(f"\n{'#':<4}{'Package':<32}{'Version':<15}{'Size':>10}")
     print("-" * 64)
     for i, (name, (size, version, _)) in enumerate(ordered, start=1):
-        print(f"{i:<4}{name:<32}{version:<15}{human_size(size):>10}")
+        display_name = truncate(name, 30) + (" 🔒" if is_protected(name) else "")
+        print(f"{i:<4}{display_name:<32}{version:<15}{human_size(size):>10}")
     total = sum(size for _, (size, _, _) in ordered)
     print("-" * 64)
-    print(f"{C.BOLD}{'Total':<51}{human_size(total):>10}{C.RESET}\n")
+    print(f"{C.BOLD}{'Total':<51}{human_size(total):>10}{C.RESET}")
+    print(f"{C.DIM} 🔒 = protected, never uninstalled by this tool{C.RESET}\n")
 
 
-def uninstall_packages(names):
-    to_remove, skipped = [], []
-    for n in names:
-        (skipped if n.lower() in PROTECTED_PACKAGES else to_remove).append(n)
+def uninstall_packages(names, skip_confirm=False):
+    """Uninstall the given package names via pip. Protected packages
+    (pip / setuptools / wheel / packaging) are filtered out here — this is
+    the single choke point every uninstall path goes through (interactive
+    numbers, ranges, "all", or a direct --uninstall name), so there is no
+    way to remove them regardless of how they were selected."""
+    # de-dupe while preserving first-seen order (e.g. overlapping ranges)
+    seen = set()
+    unique_names = [n for n in names if not (n in seen or seen.add(n))]
+
+    to_remove = [n for n in unique_names if not is_protected(n)]
+    skipped = [n for n in unique_names if is_protected(n)]
 
     for n in skipped:
-        print(f"{C.YELLOW}Skipping '{n}': removing it can break pip itself.{C.RESET}")
+        print(f"{C.YELLOW}Skipping '{n}': protected, this tool never uninstalls it.{C.RESET}")
 
     if not to_remove:
         print("Nothing to uninstall.")
         return
 
-    print(f"\nAbout to uninstall: {C.BOLD}{', '.join(to_remove)}{C.RESET}")
-    confirm = input("Type 'yes' to confirm: ").strip().lower()
-    if confirm != "yes":
-        print("Cancelled.")
-        return
+    to_remove = [n for n in to_remove if not is_protected(n)]
+
+    print(f"\nAbout to uninstall {len(to_remove)} package(s): {C.BOLD}{', '.join(to_remove)}{C.RESET}")
+    if not skip_confirm:
+        confirm = input("Type 'yes' to confirm: ").strip().lower()
+        if confirm != "yes":
+            print("Cancelled.")
+            return
 
     with Spinner(f"Uninstalling {len(to_remove)} package(s)..."):
         result = run_pip(["uninstall", "-y", *to_remove])
@@ -243,6 +291,51 @@ def uninstall_packages(names):
         log_action(f"FAILED uninstall: {', '.join(to_remove)} — {result.stderr.strip()}")
 
 
+def parse_selection(raw: str, max_index: int):
+    """Parse a selection string like '1,3,5-10,20-25' (or 'all') into a
+    sorted, de-duplicated list of valid indices. Never raises — invalid or
+    out-of-range tokens are collected as warnings and skipped instead of
+    aborting the whole selection.
+
+    Returns (indices, warnings).
+    """
+    warnings = []
+    if raw.strip().lower() == "all":
+        return list(range(1, max_index + 1)), warnings
+
+    selected = set()
+    for token in (t.strip() for t in raw.split(",")):
+        if not token:
+            continue
+
+        if "-" in token and not token.startswith("-"):
+            start_s, sep, end_s = token.partition("-")
+            start_s, end_s = start_s.strip(), end_s.strip()
+            if not (start_s.isdigit() and end_s.isdigit()):
+                warnings.append(f"Ignoring malformed range: '{token}'")
+                continue
+            start, end = int(start_s), int(end_s)
+            if start > end:
+                start, end = end, start
+            clamped_start, clamped_end = max(start, 1), min(end, max_index)
+            if clamped_start > clamped_end:
+                warnings.append(f"Range '{token}' is entirely out of bounds (1-{max_index}), ignored")
+                continue
+            if start < 1 or end > max_index:
+                warnings.append(f"Range '{token}' clamped to {clamped_start}-{clamped_end}")
+            selected.update(range(clamped_start, clamped_end + 1))
+        elif token.lstrip("-").isdigit() and not token.startswith("-"):
+            n = int(token)
+            if 1 <= n <= max_index:
+                selected.add(n)
+            else:
+                warnings.append(f"Ignoring out-of-range number: {n} (valid: 1-{max_index})")
+        else:
+            warnings.append(f"Ignoring invalid entry: '{token}'")
+
+    return sorted(selected), warnings
+
+
 def interactive_uninstall():
     ordered = list_packages()
     if not ordered:
@@ -250,27 +343,25 @@ def interactive_uninstall():
         return
     print_package_table(ordered)
     choice = input(
-        "Enter numbers to uninstall (comma-separated, e.g. 1,3,5), "
-        "or press Enter to cancel: "
+        "Enter numbers/ranges to uninstall — e.g. '1,3,5-10' or '1-165' "
+        "(also accepts 'all'), or press Enter to cancel: "
     ).strip()
     if not choice:
         print("Cancelled.")
         return
-    try:
-        idxs = [int(x.strip()) for x in choice.split(",") if x.strip()]
-    except ValueError:
-        print("Couldn't parse that input, cancelling.")
+
+    idxs, warnings = parse_selection(choice, len(ordered))
+    for w in warnings:
+        print(f"{C.YELLOW}{w}{C.RESET}")
+
+    if not idxs:
+        print("Nothing valid selected, cancelling.")
         return
-    names = []
-    for i in idxs:
-        if 1 <= i <= len(ordered):
-            names.append(ordered[i - 1][0])
-        else:
-            print(f"Ignoring out-of-range number: {i}")
+
+    names = [ordered[i - 1][0] for i in idxs]
     uninstall_packages(names)
 
-
-# cache manager -----
+# cache pip ----
 
 def get_cache_info() -> str:
     return run_pip(["cache", "info"]).stdout
@@ -293,7 +384,7 @@ def clean_built_wheel_cache_keep_latest():
     """Among *locally built* wheels only (pip cache list can't see the
     HTTP download cache), keep the newest version of each package and
     delete older cached wheel files. Uses --format=abspath for real,
-    reliable file paths instead of parsing human-readable text."""
+    reliable file paths instead of parsing human readable text."""
     with Spinner("Scanning built-wheel cache..."):
         result = run_pip(["cache", "list", "--format=abspath"])
     paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -350,21 +441,20 @@ def clean_built_wheel_cache_keep_latest():
     log_action(f"Removed {deleted} old cached wheel(s), freed {human_size(freed)}")
 
 
-
-# menu -----
+# menu ----
 
 def main_menu():
     banner()
     while True:
         print(
             f"{C.BOLD}=== pip-manager ==={C.RESET}\n"
-            "1) List installed packages by size\n"
-            "2) Uninstall packages (reclaim disk space)\n"
-            "3) Show pip cache info\n"
-            "4) Purge entire pip cache\n"
-            "5) Clean cache: keep only latest built wheel per package\n"
-            "6) Show environment & storage paths\n"
-            "7) Exit"
+            "1} List installed packages by size\n"
+            "2} Uninstall packages [Reclaim Storage] \n"
+            "3} Show pip cache info\n"
+            "4} Purge entire pip cache\n"
+            "5} Clean cache: keep only latest built wheel per package\n"
+            "6} Show environment & storage paths\n"
+            "7} Exit"
         )
         choice = input("Choose an option: ").strip()
         if choice == "1":
@@ -380,7 +470,7 @@ def main_menu():
         elif choice == "6":
             show_environment_info()
         elif choice == "7":
-            print("Made By Harshit Sharma {XTHS}, See ya.")
+            print("Bye.")
             break
         else:
             print(f"{C.YELLOW}Not a valid option.{C.RESET}")
@@ -394,6 +484,15 @@ def main():
     parser.add_argument("--list", action="store_true", help="List installed packages by size and exit")
     parser.add_argument("--purge-cache", action="store_true", help="Purge entire pip cache without prompting")
     parser.add_argument("--paths", action="store_true", help="Show environment/storage paths and exit")
+    parser.add_argument(
+        "--uninstall", metavar="PACKAGE", nargs="+",
+        help="Uninstall one or more packages by name (non-interactive selection; "
+             "pip/setuptools/wheel/packaging are always protected)",
+    )
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation prompt for --uninstall (use with care)",
+    )
     parser.add_argument("--version", action="version", version=f"pip-manager {__version__} — by {__author__}")
     args = parser.parse_args()
 
@@ -403,11 +502,14 @@ def main():
         purge_cache(confirm=False)
     elif args.paths:
         show_environment_info()
+    elif args.uninstall:
+        uninstall_packages(args.uninstall, skip_confirm=args.yes)
     else:
         main_menu()
 
 
 if __name__ == "__main__":
+    _enable_windows_ansi()
     try:
         main()
     except KeyboardInterrupt:
