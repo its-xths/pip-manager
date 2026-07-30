@@ -40,7 +40,7 @@ except ImportError:
     sys.exit(1)
 
 
-__version__ = "1.1.0"
+__version__ = "1.0.0"
 __author__ = "Its-Xths"
 __repo__ = "https://github.com/Its-Xths/pip-manager"
 
