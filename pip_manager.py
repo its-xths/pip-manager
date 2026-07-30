@@ -41,8 +41,8 @@ except ImportError:
 
 
 __version__ = "1.0.0"
-__author__ = "Its-Xths"
-__repo__ = "https://github.com/Its-Xths/pip-manager"
+__author__ = "XTHS"
+__repo__ = "https://github.com/its-xths/pip-manager"
 
 LOG_FILE = Path(__file__).resolve().parent / "xths_pip_logs.log"
 
@@ -86,9 +86,9 @@ def _enable_windows_ansi():
 
 def banner():
     print(f"""{C.CYAN}{C.BOLD}
-  ____  ____   __  __
- |  _ \\|  _ \ \ |  \\/  | __ _ _ __   __ _  __ _  ___ _ __
- | |_) | |_) | | |\\/| |/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|
+  ____  ____   __ __
+ |  _ \\|  _\  \ | \\/| __ _ _ __   __ _  __ _  ___ _ __
+ | |_) | |_) | | |\\/||/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|
  |  __/|  __/  | |  | | (_| | | | | (_| | (_| |  __/ |
  |_|   |_|     |_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|_|  .XTHS
                                         |___/
