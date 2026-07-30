@@ -446,7 +446,7 @@ def main_menu():
     banner()
     while True:
         print(
-            f"{C.BOLD}=== pip-manager ==={C.RESET}\n"
+            f"{C.BOLD}____ pip-manager ____{C.RESET}\n"
             "1} List installed packages by size\n"
             "2} Uninstall packages [Reclaim Storage] \n"
             "3} Show pip cache info\n"
